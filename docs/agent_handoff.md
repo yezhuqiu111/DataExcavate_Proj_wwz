@@ -11,34 +11,59 @@
 
 ## 必读顺序
 README.md
+
 项目运行入口、环境配置、输出文件和当前范围。
+
 docs/PROJECT_HANDOFF.md
+
 面向新成员的中文项目状态说明。
 包含 PRD、ADR、issue tracker、报告模板各自的作用。
+
 CONTEXT.md
+
 项目术语表。后续写文档和 issue 时沿用这里的语言。
+
 .scratch/midterm-graphrag-baseline/PRD.md
+
 最小 baseline 的范围来源。
+
 docs/adr/0001-midterm-baseline-uses-lightweight-graph-retrieval.md
+
 架构决策：中期 baseline 使用 TF-IDF seed retrieval + 一跳规则共现图扩展，不引入 Neo4j、dense embeddings 或 mandatory LLM。
+
 .scratch/midterm-graphrag-baseline/issues/
+
 7 个 issue 均已标记 completed，底部 comments 记录对应 commit 和完成内容。
+
 docs/COLLABORATOR_HANDOFF.md
+
 面向合作者的缺陷、优化方向、分支/commit/PR/issue 协作规范。
+
 docs/项目中期进展报告模板.md
+
 课程中期报告要求。报告需要 commit 统计、分支协作说明、目录结构、运行日志、指标表、失败案例和 AI 使用记录。
+
 ## 当前实现状态
 最小 baseline 已实现，核心文件：
 
 run_midterm.py：一键 pipeline。
+
 src/data_loader.py：本地 JSON/JSONL 或 HuggingFace QASPER 加载。
+
 src/preprocess.py：Processed QASPER Slice 标准化。
+
 src/audit.py：数据审计。
+
 src/retrieval.py：纯标准库 TF-IDF RAG baseline。
+
 src/graph_rag.py：Rule-Based Co-Occurrence GraphRAG。
+
 src/answering.py：抽取式回答与 INSUFFICIENT_EVIDENCE 拒答。
+
 src/evaluate.py：Evidence Recall@5、Answer Token F1、Refusal Accuracy、latency 和 Failure Cases。
+
 tests/：pytest-style 测试和无依赖 smoke suite。
+
 
 ## 一、项目是什么
 
