@@ -12,9 +12,15 @@ INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 def answer_from_evidence(
     question: str,
     evidence: list[dict[str, Any]],
-    min_score: float = 0.05,
+    min_score: float = 0.12,
+    has_graph_match: bool = False,
 ) -> dict[str, Any]:
-    if not evidence or float(evidence[0].get("score", 0.0)) < min_score:
+    if not evidence:
+        return {"answer": INSUFFICIENT_EVIDENCE, "evidence_ids": [], "refused": True}
+
+    support_score = float(evidence[0].get("lexical_score", evidence[0].get("score", 0.0)))
+    effective_min_score = min_score * 0.75 if has_graph_match else min_score
+    if support_score < effective_min_score:
         return {"answer": INSUFFICIENT_EVIDENCE, "evidence_ids": [], "refused": True}
 
     sentence = _best_sentence(question, str(evidence[0].get("text", "")))

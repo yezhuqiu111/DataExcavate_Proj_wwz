@@ -69,6 +69,7 @@ def test_graph_rag_retrieve_with_trace_exposes_expansion_state():
     assert trace["graph_bonus"] == 0.2
     assert trace["returned_evidence_ids"] == result_ids
     assert trace["seed_evidence_ids"]
+    assert trace["expansion_paths"]
     assert set(trace["seed_evidence_ids"]).issubset(set(trace["candidate_evidence_ids"]))
     assert all(evidence_id.startswith("p1::") for evidence_id in trace["candidate_evidence_ids"])
     assert "graph" in trace["query_terms"]

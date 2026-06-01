@@ -31,7 +31,34 @@ STOPWORDS = {
     "where",
     "which",
     "with",
+    "also",
+    "been",
+    "could",
+    "does",
+    "have",
+    "into",
+    "may",
+    "more",
+    "most",
+    "paper",
+    "should",
+    "such",
+    "than",
+    "that",
+    "their",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "using",
+    "were",
+    "will",
+    "would",
 }
+
+TRACE_SAMPLE_LIMIT = 100
 
 
 class GraphRagRetriever:
@@ -76,11 +103,21 @@ class GraphRagRetriever:
         seed_ids = {seed["paragraph_id"] for seed in seeds}
         query_terms = extract_terms(query)
         expansion_terms = set(query_terms)
+        expansion_paths: list[dict[str, Any]] = []
         for seed in seeds:
             seed_terms = self.paragraph_terms.get(seed["paragraph_id"], set())
             expansion_terms.update(seed_terms)
             for term in seed_terms | query_terms:
-                expansion_terms.update(self.neighbors.get(term, set()))
+                neighbors = self.neighbors.get(term, set())
+                expansion_terms.update(neighbors)
+                for neighbor in sorted(neighbors - {term}):
+                    expansion_paths.append(
+                        {
+                            "seed_evidence_id": seed["paragraph_id"],
+                            "source_term": term,
+                            "expanded_term": neighbor,
+                        }
+                    )
 
         candidate_ids = set(seed_ids)
         for term in expansion_terms:
@@ -100,16 +137,29 @@ class GraphRagRetriever:
             graph_matches = len(query_terms & self.paragraph_terms.get(paragraph_id, set()))
             if paragraph_id not in seed_ids:
                 graph_matches += 1
-            score = lexical_scores.get(paragraph_id, 0.0) + graph_bonus * graph_matches
-            scored.append({**document, "score": score, "graph_matches": graph_matches})
+            lexical_score = lexical_scores.get(paragraph_id, 0.0)
+            score = lexical_score + graph_bonus * graph_matches
+            scored.append(
+                {
+                    **document,
+                    "score": score,
+                    "lexical_score": lexical_score,
+                    "graph_matches": graph_matches,
+                }
+            )
 
         scored.sort(key=lambda item: (-item["score"], str(item["paragraph_id"])))
         evidence = scored[:top_k]
+        expanded_terms = sorted(expansion_terms - query_terms)
+        candidate_evidence_ids = sorted(filtered_candidate_ids)
         trace = {
             "seed_evidence_ids": sorted(seed_ids),
             "query_terms": sorted(query_terms),
-            "expanded_terms": sorted(expansion_terms - query_terms),
-            "candidate_evidence_ids": sorted(filtered_candidate_ids),
+            "expanded_terms": expanded_terms[:TRACE_SAMPLE_LIMIT],
+            "expanded_terms_count": len(expanded_terms),
+            "expansion_paths": expansion_paths[:50],
+            "candidate_evidence_ids": candidate_evidence_ids[:TRACE_SAMPLE_LIMIT],
+            "candidate_evidence_count": len(candidate_evidence_ids),
             "returned_evidence_ids": [item["paragraph_id"] for item in evidence],
             "graph_bonus": graph_bonus,
         }
@@ -171,7 +221,13 @@ class GraphRagRetriever:
 
 def extract_terms(text: Any) -> set[str]:
     terms = {token.lower() for token in TOKEN_RE.findall(str(text)) if len(token) >= 4}
-    return {term for term in terms if term not in STOPWORDS}
+    return {
+        term
+        for term in terms
+        if term not in STOPWORDS
+        and not term.isdigit()
+        and not term.startswith(("bibref", "figref", "tabref"))
+    }
 
 
 def run_graph_rag(
@@ -187,7 +243,8 @@ def run_graph_rag(
             paper_id=qa.get("paper_id"),
             top_k=top_k,
         )
-        answer = answer_from_evidence(qa.get("question", ""), evidence)
+        graph_match = retriever.has_query_match(qa.get("question", ""), evidence)
+        answer = answer_from_evidence(qa.get("question", ""), evidence, has_graph_match=graph_match)
         predictions.append(
             {
                 "question_id": qa.get("question_id"),
@@ -199,7 +256,7 @@ def run_graph_rag(
                 "scores": [item["score"] for item in evidence],
                 "latency_ms": latency_ms,
                 "refused": answer["refused"],
-                "graph_match": retriever.has_query_match(qa.get("question", ""), evidence),
+                "graph_match": graph_match,
                 "graph_trace": trace,
             }
         )
