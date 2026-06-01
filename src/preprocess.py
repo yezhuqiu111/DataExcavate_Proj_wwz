@@ -30,11 +30,15 @@ def normalize_qasper_records(
         }
         papers.append(paper)
 
-        paragraph_lookup = {
-            paragraph["text"].strip(): paragraph["paragraph_id"]
+        paragraph_lookup = [
+            {
+                "paragraph_id": paragraph["paragraph_id"],
+                "text": paragraph["text"].strip(),
+                "normalized_text": _normalize_text_key(paragraph["text"]),
+            }
             for paragraph in paragraphs
             if paragraph["text"].strip()
-        }
+        ]
         for qa_index, raw_qa in enumerate(_iter_qas(raw.get("qas", []))):
             if max_qas is not None and len(qas) >= max_qas:
                 break
@@ -136,15 +140,18 @@ def _normalize_qa(
     paper_id: str,
     qa_index: int,
     raw_qa: dict[str, Any],
-    paragraph_lookup: dict[str, str],
+    paragraph_lookup: list[dict[str, str]],
 ) -> dict[str, Any]:
     raw_question_id = str(raw_qa.get("question_id") or f"q{qa_index:04d}")
     answers, evidence_texts, unanswerable = _extract_answer_fields(raw_qa.get("answers", []))
-    evidence_ids = [
-        paragraph_lookup[text.strip()]
-        for text in evidence_texts
-        if text.strip() in paragraph_lookup
-    ]
+    evidence_matches = [_match_evidence_text(text, paragraph_lookup) for text in evidence_texts]
+    evidence_ids = _dedupe(
+        [
+            match["paragraph_id"]
+            for match in evidence_matches
+            if match["paragraph_id"] and match["match_type"] != "missing"
+        ]
+    )
     return {
         "question_id": f"{paper_id}::{raw_question_id}",
         "paper_id": paper_id,
@@ -152,6 +159,7 @@ def _normalize_qa(
         "answers": answers,
         "evidence": evidence_texts,
         "evidence_ids": evidence_ids,
+        "evidence_matches": evidence_matches,
         "unanswerable": unanswerable,
     }
 
@@ -258,6 +266,28 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(value)
             deduped.append(value)
     return deduped
+
+
+def _match_evidence_text(evidence_text: str, paragraph_lookup: list[dict[str, str]]) -> dict[str, str]:
+    text = evidence_text.strip()
+    normalized = _normalize_text_key(text)
+    if not normalized:
+        return {"evidence": text, "paragraph_id": "", "match_type": "missing"}
+
+    for paragraph in paragraph_lookup:
+        if normalized == paragraph["normalized_text"]:
+            return {"evidence": text, "paragraph_id": paragraph["paragraph_id"], "match_type": "exact"}
+
+    for paragraph in paragraph_lookup:
+        paragraph_text = paragraph["normalized_text"]
+        if normalized in paragraph_text or paragraph_text in normalized:
+            return {"evidence": text, "paragraph_id": paragraph["paragraph_id"], "match_type": "partial"}
+
+    return {"evidence": text, "paragraph_id": "", "match_type": "missing"}
+
+
+def _normalize_text_key(text: Any) -> str:
+    return " ".join(str(text).lower().split())
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:

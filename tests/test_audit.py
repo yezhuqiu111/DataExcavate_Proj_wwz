@@ -17,6 +17,7 @@ def test_audit_reports_long_text_missing_evidence_and_unanswerable_counts():
             "paper_id": "p1",
             "evidence": ["short evidence paragraph"],
             "evidence_ids": ["p1::p0000"],
+            "evidence_matches": [{"match_type": "exact", "paragraph_id": "p1::p0000"}],
             "unanswerable": False,
         },
         {
@@ -24,6 +25,7 @@ def test_audit_reports_long_text_missing_evidence_and_unanswerable_counts():
             "paper_id": "p1",
             "evidence": ["not found"],
             "evidence_ids": [],
+            "evidence_matches": [{"match_type": "missing", "paragraph_id": ""}],
             "unanswerable": False,
         },
         {
@@ -41,6 +43,8 @@ def test_audit_reports_long_text_missing_evidence_and_unanswerable_counts():
     assert audit["qas"] == 3
     assert audit["paragraphs"] == 2
     assert audit["long_paragraphs"]["count"] == 1
+    assert audit["evidence"]["exact_match_count"] == 1
+    assert audit["evidence"]["missing_match_count"] == 1
     assert audit["evidence"]["missing_or_incomplete_count"] == 1
     assert audit["unanswerable"]["count"] == 1
     assert audit["unanswerable"]["share"] == 1 / 3

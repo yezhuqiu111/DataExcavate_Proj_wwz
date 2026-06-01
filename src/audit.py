@@ -29,13 +29,21 @@ def audit_processed_slice(
         if doc_words >= long_document_words:
             long_document_ids.append(str(paper.get("paper_id")))
 
-    missing_or_incomplete = [
-        qa
-        for qa in qas
-        if not qa.get("unanswerable")
-        and bool(qa.get("evidence"))
-        and not bool(qa.get("evidence_ids"))
-    ]
+    exact_evidence_matches = 0
+    partial_evidence_matches = 0
+    missing_evidence_matches = 0
+    missing_or_incomplete: list[dict[str, Any]] = []
+    for qa in qas:
+        matches = qa.get("evidence_matches") or []
+        if matches:
+            exact_evidence_matches += sum(1 for match in matches if match.get("match_type") == "exact")
+            partial_evidence_matches += sum(1 for match in matches if match.get("match_type") == "partial")
+            missing_evidence_matches += sum(1 for match in matches if match.get("match_type") == "missing")
+            if not qa.get("unanswerable") and any(match.get("match_type") == "missing" for match in matches):
+                missing_or_incomplete.append(qa)
+        elif not qa.get("unanswerable") and bool(qa.get("evidence")) and not bool(qa.get("evidence_ids")):
+            missing_evidence_matches += len(qa.get("evidence", []))
+            missing_or_incomplete.append(qa)
     unanswerable = [qa for qa in qas if qa.get("unanswerable")]
 
     return {
@@ -55,6 +63,9 @@ def audit_processed_slice(
             "paragraph_ids": long_paragraph_ids,
         },
         "evidence": {
+            "exact_match_count": exact_evidence_matches,
+            "partial_match_count": partial_evidence_matches,
+            "missing_match_count": missing_evidence_matches,
             "missing_or_incomplete_count": len(missing_or_incomplete),
             "missing_or_incomplete_question_ids": [
                 str(qa.get("question_id")) for qa in missing_or_incomplete

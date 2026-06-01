@@ -59,6 +59,13 @@ def test_tiny_qasper_fixture_writes_stable_processed_jsonl(tmp_path):
     assert qa["question_id"] == "paper-a::q-a"
     assert qa["paper_id"] == "paper-a"
     assert qa["evidence_ids"] == ["paper-a::p0000"]
+    assert qa["evidence_matches"] == [
+        {
+            "evidence": "Graph retrieval links terms in paper paragraphs.",
+            "paragraph_id": "paper-a::p0000",
+            "match_type": "exact",
+        }
+    ]
     assert qa["answers"] == ["Graph retrieval"]
     assert qa["unanswerable"] is False
 
@@ -101,3 +108,36 @@ def test_hf_columnar_answers_are_normalized():
     assert qas[0]["answers"] == ["Graph retrieval"]
     assert qas[0]["evidence"] == ["Graph retrieval links terms in paper paragraphs."]
     assert qas[0]["evidence_ids"] == ["paper-b::p0000"]
+
+
+def test_evidence_text_can_match_paragraph_substrings():
+    raw_records = [
+        {
+            "id": "paper-c",
+            "full_text": [
+                {
+                    "section_name": "Intro",
+                    "paragraphs": ["The method uses GraphRAG expansion to improve evidence coverage."],
+                }
+            ],
+            "qas": [
+                {
+                    "question": "What improves evidence coverage?",
+                    "answers": [
+                        {
+                            "answer": {
+                                "extractive_spans": ["GraphRAG expansion"],
+                                "evidence": ["GraphRAG expansion to improve evidence coverage"],
+                                "unanswerable": False,
+                            }
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    _, qas = normalize_qasper_records(raw_records)
+
+    assert qas[0]["evidence_ids"] == ["paper-c::p0000"]
+    assert qas[0]["evidence_matches"][0]["match_type"] == "partial"
