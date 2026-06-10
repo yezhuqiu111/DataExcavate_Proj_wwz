@@ -7,9 +7,10 @@ def test_weak_retrieval_refuses_and_failure_cases_are_report_ready():
     answer = answer_from_evidence("What is GraphRAG?", evidence, min_score=0.05)
     graph_supported_answer = answer_from_evidence(
         "What is GraphRAG?",
-        [{"paragraph_id": "p1::p0000", "text": "GraphRAG expansion text", "score": 0.1}],
+        [{"paragraph_id": "p1::p0000", "text": "GraphRAG expansion text", "score": 0.11, "lexical_score": 0.11}],
         min_score=0.12,
         has_graph_match=True,
+        query_term_overlap=1,
     )
     qas = [
         {

@@ -61,6 +61,10 @@ STOPWORDS = {
 TRACE_SAMPLE_LIMIT = 100
 EXPANSION_MATCH_WEIGHT = 0.25
 MAX_EXPANSION_MATCHES = 2
+MAX_EXPANSION_TERMS = 120
+MAX_NEIGHBORS_PER_TERM = 12
+MAX_SEED_TERMS_FOR_EXPANSION = 8
+MAX_TERM_DF_RATIO = 0.2
 
 
 class GraphRagRetriever:
@@ -69,6 +73,7 @@ class GraphRagRetriever:
         self.documents = {doc["paragraph_id"]: doc for doc in tfidf.documents}
         self.paragraph_terms: dict[str, set[str]] = {}
         self.term_paragraphs: dict[str, set[str]] = defaultdict(set)
+        self.term_document_frequency: dict[str, int] = {}
         self.neighbors: dict[str, set[str]] = defaultdict(set)
         self._build_graph(papers)
 
@@ -104,22 +109,7 @@ class GraphRagRetriever:
         seeds = self.tfidf.retrieve(query, paper_id=paper_id, top_k=seed_k)
         seed_ids = {seed["paragraph_id"] for seed in seeds}
         query_terms = extract_terms(query)
-        expansion_terms = set(query_terms)
-        expansion_paths: list[dict[str, Any]] = []
-        for seed in seeds:
-            seed_terms = self.paragraph_terms.get(seed["paragraph_id"], set())
-            expansion_terms.update(seed_terms)
-            for term in seed_terms | query_terms:
-                neighbors = self.neighbors.get(term, set())
-                expansion_terms.update(neighbors)
-                for neighbor in sorted(neighbors - {term}):
-                    expansion_paths.append(
-                        {
-                            "seed_evidence_id": seed["paragraph_id"],
-                            "source_term": term,
-                            "expanded_term": neighbor,
-                        }
-                    )
+        expansion_terms, expansion_paths = self._collect_expansion_terms(seeds, query_terms)
 
         candidate_ids = set(seed_ids)
         for term in expansion_terms:
@@ -213,6 +203,60 @@ class GraphRagRetriever:
         query_terms = extract_terms(query)
         return any(query_terms & self.paragraph_terms.get(item.get("paragraph_id"), set()) for item in evidence)
 
+    def query_term_overlap(self, query: str, evidence: list[dict[str, Any]]) -> int:
+        query_terms = extract_terms(query)
+        if not query_terms or not evidence:
+            return 0
+        top_terms = self.paragraph_terms.get(evidence[0].get("paragraph_id"), set())
+        return len(query_terms & top_terms)
+
+    def _is_expandable_term(self, term: str) -> bool:
+        total_paragraphs = max(len(self.paragraph_terms), 1)
+        frequency = self.term_document_frequency.get(term, 0)
+        allowed = max(2, int(total_paragraphs * MAX_TERM_DF_RATIO))
+        return frequency <= allowed
+
+    def _collect_expansion_terms(
+        self,
+        seeds: list[dict[str, Any]],
+        query_terms: set[str],
+    ) -> tuple[set[str], list[dict[str, Any]]]:
+        """Expand only from query terms and a small set of low-frequency seed terms."""
+        expansion_terms = set(query_terms)
+        expansion_paths: list[dict[str, Any]] = []
+        expanded_only_budget = MAX_EXPANSION_TERMS
+
+        for seed in seeds:
+            seed_terms = self.paragraph_terms.get(seed["paragraph_id"], set())
+            overlapping_seed_terms = sorted(seed_terms & query_terms)
+            other_seed_terms = sorted(seed_terms - query_terms)[:MAX_SEED_TERMS_FOR_EXPANSION]
+            source_terms = list(query_terms) + overlapping_seed_terms + other_seed_terms
+            seen_sources: set[str] = set()
+            for term in source_terms:
+                if term in seen_sources or not self._is_expandable_term(term):
+                    continue
+                seen_sources.add(term)
+                neighbors = sorted(
+                    neighbor
+                    for neighbor in self.neighbors.get(term, set())
+                    if neighbor != term and self._is_expandable_term(neighbor)
+                )[:MAX_NEIGHBORS_PER_TERM]
+                for neighbor in neighbors:
+                    if neighbor in query_terms:
+                        continue
+                    if len(expansion_terms - query_terms) >= expanded_only_budget:
+                        return expansion_terms, expansion_paths
+                    if neighbor not in expansion_terms:
+                        expansion_terms.add(neighbor)
+                        expansion_paths.append(
+                            {
+                                "seed_evidence_id": seed["paragraph_id"],
+                                "source_term": term,
+                                "expanded_term": neighbor,
+                            }
+                        )
+        return expansion_terms, expansion_paths
+
     def _build_graph(self, papers: list[dict[str, Any]]) -> None:
         for paper in papers:
             for paragraph in paper.get("paragraphs", []):
@@ -225,6 +269,9 @@ class GraphRagRetriever:
                     self.term_paragraphs[term].add(paragraph_id)
                 for term in terms:
                     self.neighbors[term].update(terms - {term})
+        self.term_document_frequency = {
+            term: len(paragraph_ids) for term, paragraph_ids in self.term_paragraphs.items()
+        }
 
 
 def extract_terms(text: Any) -> set[str]:
@@ -252,7 +299,13 @@ def run_graph_rag(
             top_k=top_k,
         )
         graph_match = retriever.has_query_match(qa.get("question", ""), evidence)
-        answer = answer_from_evidence(qa.get("question", ""), evidence, has_graph_match=graph_match)
+        query_overlap = retriever.query_term_overlap(qa.get("question", ""), evidence)
+        answer = answer_from_evidence(
+            qa.get("question", ""),
+            evidence,
+            has_graph_match=graph_match,
+            query_term_overlap=query_overlap,
+        )
         predictions.append(
             {
                 "question_id": qa.get("question_id"),
