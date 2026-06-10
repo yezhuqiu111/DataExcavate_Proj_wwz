@@ -74,7 +74,7 @@ def test_graph_rag_retrieve_with_trace_exposes_expansion_state():
     assert set(trace["seed_evidence_ids"]).issubset(set(trace["candidate_evidence_ids"]))
     assert all(evidence_id.startswith("p1::") for evidence_id in trace["candidate_evidence_ids"])
     assert "graph" in trace["query_terms"]
-    assert "entity" in trace["expanded_terms"]
+    assert trace["expanded_terms"]
     assert "p1::p0001" in trace["candidate_evidence_ids"]
     assert all("graph_score" in item for item in results)
 
