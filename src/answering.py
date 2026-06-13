@@ -15,15 +15,16 @@ def answer_from_evidence(
     min_score: float = 0.12,
     has_graph_match: bool = False,
     query_term_overlap: int = 0,
+    enable_refusal: bool = True,
 ) -> dict[str, Any]:
     if not evidence:
         return {"answer": INSUFFICIENT_EVIDENCE, "evidence_ids": [], "refused": True}
 
     support_score = float(evidence[0].get("lexical_score", evidence[0].get("score", 0.0)))
     effective_min_score = min_score * 0.85 if has_graph_match and query_term_overlap >= 1 else min_score
-    if support_score < effective_min_score:
+    if enable_refusal and support_score < effective_min_score:
         return {"answer": INSUFFICIENT_EVIDENCE, "evidence_ids": [], "refused": True}
-    if support_score < min_score and query_term_overlap < 1:
+    if enable_refusal and support_score < min_score and query_term_overlap < 1:
         return {"answer": INSUFFICIENT_EVIDENCE, "evidence_ids": [], "refused": True}
 
     sentence = _best_sentence(question, str(evidence[0].get("text", "")))

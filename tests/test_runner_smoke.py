@@ -46,9 +46,18 @@ def test_runner_writes_midterm_artifacts_from_local_fixture(tmp_path):
     assert (tmp_path / "out" / "processed" / "papers.jsonl").exists()
     assert (tmp_path / "out" / "audit.json").exists()
     assert (tmp_path / "out" / "baseline_metrics.json").exists()
+    assert (tmp_path / "out" / "bm25_metrics.json").exists()
+    assert (tmp_path / "out" / "dense_metrics.json").exists()
     assert (tmp_path / "out" / "graphrag_metrics.json").exists()
+    assert (tmp_path / "out" / "graphrag_no_edges_metrics.json").exists()
+    assert (tmp_path / "out" / "graphrag_no_refusal_metrics.json").exists()
+    assert (tmp_path / "out" / "experiment_comparison.json").exists()
+    assert (tmp_path / "out" / "experiment_analysis.md").exists()
+    assert (tmp_path / "out" / "proposal_experiment_report.md").exists()
     assert (tmp_path / "out" / "failure_cases.json").exists()
     assert (tmp_path / "out" / "run_summary.json").exists()
+    assert "bm25" in summary["experiments"]
+    assert "dense" in summary["experiments"]
 
 
 def test_runner_supports_uncapped_local_run_and_scale_comparison(tmp_path):

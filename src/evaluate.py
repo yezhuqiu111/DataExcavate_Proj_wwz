@@ -16,9 +16,15 @@ def evaluate_predictions(
     prediction_by_id = {prediction.get("question_id"): prediction for prediction in predictions}
     recall_hits = 0
     recall_total = 0
+    exact_match_values: list[float] = []
     f1_values: list[float] = []
+    evidence_precision_values: list[float] = []
+    evidence_recall_values: list[float] = []
+    evidence_f1_values: list[float] = []
     refusal_hits = 0
     refusal_total = 0
+    unsupported_claims = 0
+    supported_answer_total = 0
     latencies: list[float] = []
 
     for qa in qas:
@@ -29,14 +35,29 @@ def evaluate_predictions(
             recall_total += 1
             if set(gold_ids) & set(retrieved_ids):
                 recall_hits += 1
+            precision, recall, f1 = _evidence_prf(retrieved_ids, gold_ids)
+            evidence_precision_values.append(precision)
+            evidence_recall_values.append(recall)
+            evidence_f1_values.append(f1)
 
         if qa.get("answers"):
-            f1_values.append(_best_answer_f1(str(prediction.get("predicted_answer", "")), qa.get("answers", [])))
+            predicted_answer = str(prediction.get("predicted_answer", ""))
+            f1_values.append(_best_answer_f1(predicted_answer, qa.get("answers", [])))
+            exact_match_values.append(_best_exact_match(predicted_answer, qa.get("answers", [])))
 
         if qa.get("unanswerable"):
             refusal_total += 1
             if prediction.get("refused") or prediction.get("predicted_answer") == INSUFFICIENT_EVIDENCE:
                 refusal_hits += 1
+
+        predicted_refusal = prediction.get("refused") or prediction.get("predicted_answer") == INSUFFICIENT_EVIDENCE
+        if not predicted_refusal:
+            supported_answer_total += 1
+            if not _answer_supported_by_evidence(
+                str(prediction.get("predicted_answer", "")),
+                prediction.get("retrieved_evidence", []),
+            ):
+                unsupported_claims += 1
 
         if prediction.get("latency_ms") is not None:
             latencies.append(float(prediction["latency_ms"]))
@@ -47,8 +68,17 @@ def evaluate_predictions(
         "top_k": top_k,
         "evidence_recall_at_k": evidence_recall,
         f"evidence_recall_at_{top_k}": evidence_recall,
+        "evidence_precision_at_k": sum(evidence_precision_values) / len(evidence_precision_values)
+        if evidence_precision_values
+        else 0.0,
+        "evidence_id_recall_at_k": sum(evidence_recall_values) / len(evidence_recall_values)
+        if evidence_recall_values
+        else 0.0,
+        "evidence_f1_at_k": sum(evidence_f1_values) / len(evidence_f1_values) if evidence_f1_values else 0.0,
+        "answer_exact_match": sum(exact_match_values) / len(exact_match_values) if exact_match_values else 0.0,
         "answer_token_f1": sum(f1_values) / len(f1_values) if f1_values else 0.0,
         "refusal_accuracy": refusal_hits / refusal_total if refusal_total else 0.0,
+        "unsupported_claim_rate": unsupported_claims / supported_answer_total if supported_answer_total else 0.0,
         "average_latency_ms": sum(latencies) / len(latencies) if latencies else 0.0,
     }
     if top_k != 5:
@@ -133,6 +163,11 @@ def _best_answer_f1(predicted: str, answers: list[str]) -> float:
     return max((_token_f1(predicted, answer) for answer in answers), default=0.0)
 
 
+def _best_exact_match(predicted: str, answers: list[str]) -> float:
+    normalized = _normalize_answer(predicted)
+    return 1.0 if any(normalized == _normalize_answer(answer) for answer in answers) else 0.0
+
+
 def _token_f1(predicted: str, reference: str) -> float:
     predicted_tokens = [token.lower() for token in TOKEN_RE.findall(predicted)]
     reference_tokens = [token.lower() for token in TOKEN_RE.findall(reference)]
@@ -149,3 +184,36 @@ def _token_f1(predicted: str, reference: str) -> float:
     precision = overlap / len(predicted_tokens)
     recall = overlap / len(reference_tokens)
     return 2 * precision * recall / (precision + recall)
+
+
+def _evidence_prf(retrieved_ids: list[str], gold_ids: list[str]) -> tuple[float, float, float]:
+    retrieved = set(retrieved_ids)
+    gold = set(gold_ids)
+    if not retrieved or not gold:
+        return 0.0, 0.0, 0.0
+    overlap = len(retrieved & gold)
+    precision = overlap / len(retrieved)
+    recall = overlap / len(gold)
+    if precision + recall == 0:
+        return precision, recall, 0.0
+    return precision, recall, 2 * precision * recall / (precision + recall)
+
+
+def _answer_supported_by_evidence(predicted: str, evidence: list[dict[str, Any]]) -> bool:
+    answer_tokens = {
+        token.lower()
+        for token in TOKEN_RE.findall(predicted)
+        if len(token) >= 4 and token.lower() not in {"this", "that", "with", "from", "they", "have"}
+    }
+    if not answer_tokens:
+        return False
+    evidence_tokens = {
+        token.lower()
+        for item in evidence
+        for token in TOKEN_RE.findall(str(item.get("text", "")))
+    }
+    return bool(answer_tokens & evidence_tokens)
+
+
+def _normalize_answer(text: str) -> str:
+    return " ".join(token.lower() for token in TOKEN_RE.findall(text))

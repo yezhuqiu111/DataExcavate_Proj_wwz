@@ -88,6 +88,7 @@ class GraphRagRetriever:
         top_k: int = 5,
         seed_k: int = 2,
         graph_bonus: float = 0.15,
+        use_edges: bool = True,
     ) -> list[dict[str, Any]]:
         evidence, _trace = self.retrieve_with_trace(
             query=query,
@@ -95,6 +96,7 @@ class GraphRagRetriever:
             top_k=top_k,
             seed_k=seed_k,
             graph_bonus=graph_bonus,
+            use_edges=use_edges,
         )
         return evidence
 
@@ -105,11 +107,16 @@ class GraphRagRetriever:
         top_k: int = 5,
         seed_k: int = 2,
         graph_bonus: float = 0.15,
+        use_edges: bool = True,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         seeds = self.tfidf.retrieve(query, paper_id=paper_id, top_k=seed_k)
         seed_ids = {seed["paragraph_id"] for seed in seeds}
         query_terms = extract_terms(query)
-        expansion_terms, expansion_paths = self._collect_expansion_terms(seeds, query_terms)
+        if use_edges:
+            expansion_terms, expansion_paths = self._collect_expansion_terms(seeds, query_terms)
+        else:
+            expansion_terms = set(query_terms)
+            expansion_paths = []
 
         candidate_ids = set(seed_ids)
         for term in expansion_terms:
@@ -160,6 +167,7 @@ class GraphRagRetriever:
             "graph_bonus": graph_bonus,
             "expansion_match_weight": EXPANSION_MATCH_WEIGHT,
             "max_expansion_matches": MAX_EXPANSION_MATCHES,
+            "use_edges": use_edges,
         }
         return evidence, trace
 
@@ -170,6 +178,7 @@ class GraphRagRetriever:
         top_k: int = 5,
         seed_k: int = 2,
         graph_bonus: float = 0.15,
+        use_edges: bool = True,
     ) -> tuple[list[dict[str, Any]], float]:
         started = time.perf_counter()
         evidence = self.retrieve(
@@ -178,6 +187,7 @@ class GraphRagRetriever:
             top_k=top_k,
             seed_k=seed_k,
             graph_bonus=graph_bonus,
+            use_edges=use_edges,
         )
         return evidence, (time.perf_counter() - started) * 1000
 
@@ -188,6 +198,7 @@ class GraphRagRetriever:
         top_k: int = 5,
         seed_k: int = 2,
         graph_bonus: float = 0.15,
+        use_edges: bool = True,
     ) -> tuple[list[dict[str, Any]], dict[str, Any], float]:
         started = time.perf_counter()
         evidence, trace = self.retrieve_with_trace(
@@ -196,6 +207,7 @@ class GraphRagRetriever:
             top_k=top_k,
             seed_k=seed_k,
             graph_bonus=graph_bonus,
+            use_edges=use_edges,
         )
         return evidence, trace, (time.perf_counter() - started) * 1000
 
@@ -289,6 +301,9 @@ def run_graph_rag(
     papers: list[dict[str, Any]],
     qas: list[dict[str, Any]],
     top_k: int = 5,
+    use_edges: bool = True,
+    enable_refusal: bool = True,
+    method: str = "GraphRAG",
 ) -> list[dict[str, Any]]:
     retriever = GraphRagRetriever.from_papers(papers)
     predictions: list[dict[str, Any]] = []
@@ -297,6 +312,7 @@ def run_graph_rag(
             qa.get("question", ""),
             paper_id=qa.get("paper_id"),
             top_k=top_k,
+            use_edges=use_edges,
         )
         graph_match = retriever.has_query_match(qa.get("question", ""), evidence)
         query_overlap = retriever.query_term_overlap(qa.get("question", ""), evidence)
@@ -305,9 +321,11 @@ def run_graph_rag(
             evidence,
             has_graph_match=graph_match,
             query_term_overlap=query_overlap,
+            enable_refusal=enable_refusal,
         )
         predictions.append(
             {
+                "method": method,
                 "question_id": qa.get("question_id"),
                 "paper_id": qa.get("paper_id"),
                 "question": qa.get("question", ""),
@@ -319,6 +337,8 @@ def run_graph_rag(
                 "refused": answer["refused"],
                 "graph_match": graph_match,
                 "graph_trace": trace,
+                "use_edges": use_edges,
+                "enable_refusal": enable_refusal,
             }
         )
     return predictions
